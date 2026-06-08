@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CMD // Command Deck</title>
+    <meta name="description" content="Command deck — drive the whole site from a terminal.">
+    <meta name="robots" content="noindex">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Space+Grotesk:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <script src="main.js" defer></script>
+</head>
+<body>
+
+    <div class="rain-overlay"></div>
+
+    <div class="container">
+
+        <header class="glass-panel header-grid">
+            <div class="clock" id="liveClock">00:00:00</div>
+            <div class="brand-titles">
+                <h1>Command Deck</h1>
+                <div class="subtitle">Type. Navigate. Operate.</div>
+            </div>
+        </header>
+
+        <section class="glass-panel">
+            <h2>// Command Deck</h2>
+            <p style="color:#aaa;">A terminal interface. Type <code>help</code> to list commands, or try <code>game</code> to launch Asteroids-Mini.</p>
+            <div class="term-embed full" data-terminal></div>
+            <div class="cv-actions" style="margin-top:20px; justify-content:flex-start;">
+                <a href="classified.html" class="btn-sec">☣ Classified Vault</a>
+            </div>
+        </section>
+
+        <footer class="glass-panel">
+            <div class="audio-console">
+                <button class="audio-playback-btn" id="playBtn" onclick="controlAudio()">▶</button>
+                <div class="audio-timeline-rail" id="trackBar" onclick="navigateAudio(event)">
+                    <div class="audio-timeline-fill" id="trackFill"></div>
+                </div>
+            </div>
+            <audio id="audioSource" src="portal.mp3" preload="auto"></audio>
+        </footer>
+
+    </div>
+
+</body>
+</html>

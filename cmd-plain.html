@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CMD // Command Deck</title>
+    <meta name="description" content="Command deck — drive the whole site from a terminal.">
+    <meta name="robots" content="noindex">
+    <style>
+        body { background: #0a0a0a; color: #ccc; font-family: monospace; font-size: 14px; margin: 20px; }
+        h1 { color: #fff; }
+        .term-wrap { border: 1px solid #333; max-width: 860px; }
+        .term-out { background: #000; color: #ccc; padding: 12px; min-height: 320px; max-height: 520px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; }
+        .term-input-row { background: #000; border-top: 1px solid #222; padding: 8px 12px; display: flex; align-items: center; gap: 8px; }
+        .term-prompt { color: #00ff8c; flex-shrink: 0; }
+        .term-in { background: transparent; color: #fff; border: none; outline: none; font-family: monospace; font-size: 14px; flex: 1; }
+        .term-line { line-height: 1.6; }
+        .term-ok  { color: #00ff8c; }
+        .term-err { color: #ff5555; }
+        .term-dim { color: #555; }
+        .term-cmd { color: #fff; font-weight: bold; }
+        /* Mini game overlay */
+        #miniGame { position: fixed; inset: 0; background: rgba(0,0,0,0.92); display: flex; align-items: center; justify-content: center; z-index: 999; opacity: 0; pointer-events: none; transition: opacity 0.25s; }
+        #miniGame.show { opacity: 1; pointer-events: all; }
+        .mini-inner { display: flex; flex-direction: column; gap: 8px; }
+        .mini-bar { color: #fff; font-family: monospace; display: flex; gap: 20px; justify-content: space-between; align-items: center; }
+        #miniClose { background: transparent; color: #fff; border: 1px solid #555; cursor: pointer; padding: 2px 10px; font-family: monospace; }
+        .mini-help { color: #555; font-size: 12px; text-align: center; }
+        /* Matrix canvas */
+        .matrix-rain { position: fixed; inset: 0; z-index: 9999; pointer-events: none; }
+        /* Dev console */
+        #devConsole { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 800; opacity: 0; pointer-events: none; transition: opacity 0.3s; }
+        #devConsole.show { opacity: 1; pointer-events: all; }
+        .dev-console-inner { background: #0d0d0d; border: 1px solid #333; padding: 30px; max-width: 560px; width: 90%; max-height: 80vh; overflow-y: auto; }
+        .dev-console-inner h2 { color: #00ff8c; margin-bottom: 12px; }
+        .dev-console-inner p { color: #aaa; margin-bottom: 10px; line-height: 1.6; }
+        .dev-close { float: right; background: transparent; color: #888; border: none; font-size: 18px; cursor: pointer; }
+        .dev-cmds { list-style: none; padding: 0; margin-bottom: 16px; }
+        .dev-cmds li { display: flex; gap: 12px; margin-bottom: 4px; }
+        .dev-cmds code { color: #00ff8c; min-width: 120px; }
+        .dev-cmds span { color: #666; }
+        .dev-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+        .btn-prime, .btn-sec { padding: 8px 16px; border: 1px solid #555; background: transparent; color: #fff; cursor: pointer; font-family: monospace; font-size: 13px; text-decoration: none; }
+        .btn-prime { border-color: #00ff8c; color: #00ff8c; }
+        /* Toast */
+        #toastHost { position: fixed; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 8px; z-index: 9999; }
+        .toast { background: #111; border: 1px solid #333; color: #fff; padding: 10px 16px; font-family: monospace; font-size: 13px; opacity: 0; transform: translateY(8px); transition: all 0.3s; }
+        .toast.show { opacity: 1; transform: none; }
+        /* Dev mode green tint */
+        body.dev-mode { border-top: 2px solid #00ff8c; }
+    </style>
+</head>
+<body>
+    <h1>// Command Deck</h1>
+    <p>Type. Navigate. Operate. &mdash; <a href="classified.html">☣ Classified Vault</a></p>
+
+    <div class="term-wrap">
+        <div class="term-out" id="termOut"></div>
+        <div class="term-input-row">
+            <span class="term-prompt">operator@error404404:~$</span>
+            <input id="termIn" class="term-in" autocomplete="off" spellcheck="false" aria-label="Terminal input">
+        </div>
+    </div>
+
+    <script>
+    /* ---- Toast ---- */
+    function showToast(msg, ms) {
+        let host = document.getElementById('toastHost');
+        if (!host) { host = document.createElement('div'); host.id = 'toastHost'; document.body.appendChild(host); }
+        const t = document.createElement('div'); t.className = 'toast'; t.textContent = msg; host.appendChild(t);
+        requestAnimationFrame(() => t.classList.add('show'));
+        setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 400); }, ms || 3200);
+    }
+
+    /* ---- Matrix rain ---- */
+    function matrixRain() {
+        if (document.querySelector('.matrix-rain')) return;
+        const cv = document.createElement('canvas'); cv.className = 'matrix-rain'; document.body.appendChild(cv);
+        const ctx = cv.getContext('2d');
+        const chars = 'アイウエオカキクケコ0123456789@#$%&';
+        let w, h, cols, drops;
+        function resize() { w=cv.width=innerWidth; h=cv.height=innerHeight; cols=Math.floor(w/16); drops=new Array(cols).fill(0).map(()=>Math.random()*-50); }
+        resize(); window.addEventListener('resize', resize);
+        const start = performance.now(); let raf;
+        (function draw(now) {
+            ctx.fillStyle='rgba(0,0,0,0.09)'; ctx.fillRect(0,0,w,h); ctx.fillStyle='#00ff8c'; ctx.font='15px monospace';
+            for(let i=0;i<cols;i++){ctx.fillText(chars[Math.floor(Math.random()*chars.length)],i*16,drops[i]*16);if(drops[i]*16>h&&Math.random()>0.975)drops[i]=0;drops[i]++;}
+            const t=(now-start)/1000;
+            if(t>5.5)cv.style.opacity=Math.max(0,1-(t-5.5));
+            if(t>6.5){cancelAnimationFrame(raf);window.removeEventListener('resize',resize);cv.remove();return;}
+            raf=requestAnimationFrame(draw);
+        })(start);
+    }
+
+    /* ---- Dev mode ---- */
+    const DEV_KEY = 'mn_devmode';
+    function applyDevMode(on, announce) {
+        document.body.classList.toggle('dev-mode', on);
+        if (on) { try{sessionStorage.setItem(DEV_KEY,'1');}catch(e){} }
+        else { try{sessionStorage.removeItem(DEV_KEY);}catch(e){} }
+        if (announce) showToast(on ? '🎮 DEVELOPER MODE UNLOCKED' : 'Developer mode disabled');
+    }
+
+    /* ---- Dev console ---- */
+    function closeDevConsole() { const p=document.getElementById('devConsole'); if(p)p.classList.remove('show'); }
+    function openDevConsole() {
+        let p = document.getElementById('devConsole');
+        if (!p) {
+            p = document.createElement('div'); p.id = 'devConsole';
+            const cmdRows = COMMANDS.map(c=>'<li><code>'+c[0]+'</code><span>'+c[1]+'</span></li>').join('');
+            p.innerHTML =
+                '<div class="dev-console-inner">' +
+                    '<button class="dev-close" aria-label="Close">✕</button>' +
+                    '<h2>// DEV CONSOLE</h2>' +
+                    '<p>&gt; ACCESS GRANTED. Welcome to the back door, operator.</p>' +
+                    '<p>Hand-built with vanilla JavaScript, no frameworks.</p>' +
+                    '<p><strong style="color:#00ff8c">Terminal Commands</strong></p>' +
+                    '<ul class="dev-cmds">'+cmdRows+'</ul>' +
+                    '<p><strong style="color:#00ff8c">Credits</strong></p>' +
+                    '<p>Design, code &amp; music: Error404404 Studios<br>Inspired by cyberpunk / terminal UIs</p>' +
+                    '<div class="dev-actions">' +
+                        '<button class="btn-sec" id="devGameBtn">▶ Asteroids-Mini</button>' +
+                        '<a class="btn-sec" href="classified.html">☣ Classified Vault</a>' +
+                        '<button class="btn-sec" id="devDisableBtn">Disable Dev Mode</button>' +
+                    '</div>' +
+                '</div>';
+            document.body.appendChild(p);
+            p.querySelector('.dev-close').addEventListener('click', closeDevConsole);
+            p.addEventListener('click', e => { if(e.target===p) closeDevConsole(); });
+            p.querySelector('#devGameBtn').addEventListener('click', ()=>{ closeDevConsole(); launchMiniGame(); });
+            p.querySelector('#devDisableBtn').addEventListener('click', ()=>{ applyDevMode(false,true); closeDevConsole(); });
+            document.addEventListener('keydown', e => { if(e.key==='Escape') closeDevConsole(); });
+        }
+        requestAnimationFrame(() => p.classList.add('show'));
+    }
+
+    /* ---- Asteroids-Mini ---- */
+    function launchMiniGame() {
+        if (document.getElementById('miniGame')) return;
+        const wrap = document.createElement('div'); wrap.id = 'miniGame';
+        wrap.innerHTML = '<div class="mini-inner"><div class="mini-bar"><span>ASTEROIDS-MINI</span><span id="miniScore">SCORE 0</span><button id="miniClose">✕ ESC</button></div><canvas id="miniCanvas" width="640" height="420"></canvas><div class="mini-help">← → rotate · ↑ thrust · SPACE fire · R restart · ESC quit</div></div>';
+        document.body.appendChild(wrap); requestAnimationFrame(() => wrap.classList.add('show'));
+        const cv=wrap.querySelector('#miniCanvas'),ctx=cv.getContext('2d'),W=cv.width,H=cv.height;
+        const ship={x:W/2,y:H/2,a:-Math.PI/2,vx:0,vy:0,r:10};
+        let bullets=[],rocks=[],score=0,over=false,raf; const keys={};
+        const wrapPos=o=>{if(o.x<0)o.x+=W;if(o.x>W)o.x-=W;if(o.y<0)o.y+=H;if(o.y>H)o.y-=H;};
+        function spawn(n){for(let i=0;i<n;i++){const e=Math.random()*6.28;rocks.push({x:Math.random()<0.5?0:W,y:Math.random()*H,vx:Math.cos(e)*1.2,vy:Math.sin(e)*1.2,r:26});}}
+        function reset(){ship.x=W/2;ship.y=H/2;ship.vx=ship.vy=0;ship.a=-Math.PI/2;bullets=[];rocks=[];score=0;over=false;spawn(4);}
+        spawn(4);
+        function onKey(e,d){const k=e.key;if(['ArrowLeft','ArrowRight','ArrowUp',' '].includes(k))e.preventDefault();if(k==='ArrowLeft')keys.l=d;if(k==='ArrowRight')keys.r=d;if(k==='ArrowUp')keys.t=d;if(k===' '&&d&&!over)bullets.push({x:ship.x+Math.cos(ship.a)*12,y:ship.y+Math.sin(ship.a)*12,vx:Math.cos(ship.a)*6+ship.vx,vy:Math.sin(ship.a)*6+ship.vy,life:55});if((k==='r'||k==='R')&&over)reset();if(k==='Escape')close();}
+        const kd=e=>onKey(e,true),ku=e=>onKey(e,false);
+        document.addEventListener('keydown',kd);document.addEventListener('keyup',ku);
+        function close(){cancelAnimationFrame(raf);document.removeEventListener('keydown',kd);document.removeEventListener('keyup',ku);wrap.classList.remove('show');setTimeout(()=>wrap.remove(),300);}
+        wrap.querySelector('#miniClose').addEventListener('click',close);
+        (function loop(){
+            raf=requestAnimationFrame(loop);ctx.fillStyle='#000';ctx.fillRect(0,0,W,H);
+            if(!over){if(keys.l)ship.a-=0.06;if(keys.r)ship.a+=0.06;if(keys.t){ship.vx+=Math.cos(ship.a)*0.12;ship.vy+=Math.sin(ship.a)*0.12;}ship.vx*=0.99;ship.vy*=0.99;ship.x+=ship.vx;ship.y+=ship.vy;wrapPos(ship);}
+            bullets.forEach(b=>{b.x+=b.vx;b.y+=b.vy;b.life--;wrapPos(b);});bullets=bullets.filter(b=>b.life>0);
+            rocks.forEach(r=>{r.x+=r.vx;r.y+=r.vy;wrapPos(r);});
+            for(let i=rocks.length-1;i>=0;i--){for(let j=bullets.length-1;j>=0;j--){const dx=rocks[i].x-bullets[j].x,dy=rocks[i].y-bullets[j].y;if(dx*dx+dy*dy<rocks[i].r*rocks[i].r){bullets.splice(j,1);score+=10;if(rocks[i].r>14)for(let s=0;s<2;s++){const e=Math.random()*6.28;rocks.push({x:rocks[i].x,y:rocks[i].y,vx:Math.cos(e)*1.9,vy:Math.sin(e)*1.9,r:rocks[i].r/2});}rocks.splice(i,1);break;}}}
+            if(!over)for(const r of rocks){const dx=r.x-ship.x,dy=r.y-ship.y;if(dx*dx+dy*dy<(r.r+ship.r)*(r.r+ship.r))over=true;}
+            if(rocks.length===0)spawn(5);
+            if(!over){ctx.save();ctx.translate(ship.x,ship.y);ctx.rotate(ship.a);ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(14,0);ctx.lineTo(-10,8);ctx.lineTo(-6,0);ctx.lineTo(-10,-8);ctx.closePath();ctx.stroke();if(keys.t){ctx.strokeStyle='#ff8c00';ctx.beginPath();ctx.moveTo(-6,0);ctx.lineTo(-15,0);ctx.stroke();}ctx.restore();}
+            ctx.fillStyle='#fff';bullets.forEach(b=>ctx.fillRect(b.x-1.5,b.y-1.5,3,3));
+            ctx.strokeStyle='#bbb';ctx.lineWidth=2;rocks.forEach(r=>{ctx.beginPath();ctx.arc(r.x,r.y,r.r,0,6.28);ctx.stroke();});
+            wrap.querySelector('#miniScore').textContent='SCORE '+score;
+            if(over){ctx.fillStyle='#fff';ctx.textAlign='center';ctx.font='28px monospace';ctx.fillText('GAME OVER',W/2,H/2-8);ctx.font='13px monospace';ctx.fillText('Press R to restart  ·  ESC to quit',W/2,H/2+20);ctx.textAlign='left';}
+        })();
+    }
+
+    /* ---- Terminal ---- */
+    const TERM_NAV = {
+        home:'index.html', root:'index.html', index:'index.html',
+        radio:'Radio.html', feeds:'Feeds.html', cmd:'cmd.html',
+        classified:'classified.html', vault:'classified.html'
+    };
+    const COMMANDS = [
+        ['help',        'List every command'],
+        ['ls',          'List sections'],
+        ['open <name>', 'Go to a page (radio, feeds, cmd, classified)'],
+        ['radio',       'Open the radio station'],
+        ['cmd',         'Open the command deck'],
+        ['game',        'Launch Asteroids-Mini'],
+        ['matrix',      'Run the matrix-rain effect'],
+        ['theme',       'Toggle developer (green) mode'],
+        ['clear',       'Clear the terminal'],
+        ['exit',        'Close the terminal']
+    ];
+
+    function escapeHtml(s) { return String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+    function termHelpInto(print) {
+        print('Available commands:', 'term-dim');
+        COMMANDS.forEach(c => print('<span class="term-cmd">'+c[0].padEnd(14)+'</span><span class="term-dim">'+c[1]+'</span>'));
+    }
+
+    function runCommandInto(raw, ctx) {
+        const print = ctx.print;
+        const input = (raw||'').trim();
+        print('<span class="term-prompt">operator@error404404:~$</span> '+escapeHtml(input));
+        if (!input) return;
+        const parts=input.split(/\s+/),cmd=parts[0].toLowerCase(),arg=(parts[1]||'').toLowerCase();
+        const go=(url,msg)=>{print(msg,'term-ok');setTimeout(()=>{location.href=url;},450);};
+        switch(cmd) {
+            case 'help': case '?': case 'commands': termHelpInto(print); break;
+            case 'ls': case 'dir': print('radio  feeds  cmd  classified'); break;
+            case 'open': case 'cd': case 'goto':
+                if(TERM_NAV[arg]) go(TERM_NAV[arg],'Opening '+arg+'…');
+                else print('No such page: '+(arg||'(none)')+" — try 'ls'",'term-err'); break;
+            case 'home': go('index.html','Returning to base…'); break;
+            case 'radio': go('Radio.html','Tuning in…'); break;
+            case 'cmd': case 'terminal': go('cmd.html','Opening command deck…'); break;
+            case 'game': case 'asteroids': print('Launching Asteroids-Mini…','term-ok'); launchMiniGame(); break;
+            case 'matrix': print('Wake up, operator.','term-ok'); matrixRain(); break;
+            case 'theme': case 'devmode': applyDevMode(!document.body.classList.contains('dev-mode'),true); print('Theme toggled.','term-ok'); break;
+            case 'echo': print(escapeHtml(parts.slice(1).join(' '))); break;
+            case 'date': case 'time': print(new Date().toString()); break;
+            case 'clear': case 'cls': ctx.clear(); break;
+            case 'exit': case 'quit': print('(embedded terminal — nothing to close)','term-dim'); break;
+            default: {
+                const names=COMMANDS.map(c=>c[0].split(' ')[0]);
+                const near=names.find(n=>n.startsWith(cmd))||names.find(n=>cmd.length>2&&n.indexOf(cmd)>=0);
+                print('command not found: '+escapeHtml(cmd)+(near?" — did you mean '"+near+"'?":" — type 'help'"),'term-err');
+            }
+        }
+    }
+
+    /* ---- Konami → dev mode ---- */
+    function initKonami() {
+        const seq=['arrowup','arrowup','arrowdown','arrowdown','arrowleft','arrowright','arrowleft','arrowright','b','a'];
+        let pos=0;
+        document.addEventListener('keydown',e=>{
+            if(/^(input|textarea)$/i.test(e.target.tagName))return;
+            const k=(e.key||'').toLowerCase();
+            if(k===seq[pos]){if(++pos===seq.length){pos=0;matrixRain();applyDevMode(true,true);setTimeout(openDevConsole,1400);}}else{pos=(k===seq[0])?1:0;}
+        });
+    }
+
+    /* ---- Mount terminal on page load ---- */
+    document.addEventListener('DOMContentLoaded', () => {
+        const outEl = document.getElementById('termOut');
+        const inEl  = document.getElementById('termIn');
+        let hist=[], hi=0;
+        const print=(html,cls)=>{const line=document.createElement('div');line.className='term-line'+(cls?' '+cls:'');line.innerHTML=html;outEl.appendChild(line);outEl.scrollTop=outEl.scrollHeight;};
+        const ctx={print,clear:()=>{outEl.innerHTML='';}};
+        outEl.addEventListener('click',()=>inEl.focus());
+        inEl.addEventListener('keydown',e=>{
+            e.stopPropagation();
+            if(e.key==='Enter'){const v=inEl.value;inEl.value='';if(v.trim()){hist.push(v);hi=hist.length;}runCommandInto(v,ctx);}
+            else if(e.key==='ArrowUp'){if(hi>0){hi--;inEl.value=hist[hi]||'';}e.preventDefault();}
+            else if(e.key==='ArrowDown'){if(hi<hist.length-1){hi++;inEl.value=hist[hi]||'';}else{hi=hist.length;inEl.value='';}e.preventDefault();}
+            else if(e.key==='Tab'){e.preventDefault();const v=inEl.value.trim().toLowerCase();if(v){const m=COMMANDS.map(c=>c[0].split(' ')[0]).find(n=>n.startsWith(v));if(m)inEl.value=m+' ';}}
+        });
+        print('ERROR404404 // SYSTEM TERMINAL v1.0','term-ok');
+        print("Type a command and press Enter. Try <span class='term-cmd'>help</span>. (Tab completes · ↑/↓ history)",'term-dim');
+        termHelpInto(print);
+        inEl.focus();
+        initKonami();
+    });
+    </script>
+</body>
+</html>
